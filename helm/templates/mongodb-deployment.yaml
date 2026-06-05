@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: nimesh-ns
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mongodb
+  # strategy:
+  #   type: RollingUpdate
+  #   rollingUpdate:
+  #     maxUnavailable: 1
+  #     maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:7-jammy
+        ports:
+        - containerPort: 27017
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        volumeMounts:
+          - name: mongo-vct
+            mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: mongo-vct
+      spec:
+        accessModes: ["ReadWriteMany"]
+        storageClassName: storaged
+        resources:
+          requests:
+            storage: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: nimesh-ns
+spec:
+  selector:
+    app: mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+  type: ClusterIP
+  clusterIP: None
+ 
+ 

@@ -1,0 +1,23 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: fitness-route
+  namespace: nimesh-ns
+ 
+spec:
+  parentRefs:
+    - name: kgateway-1
+  rules: #path based routing
+    - matches:
+      - path:
+          type: PathPrefix
+          value: /
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: fitness-tracker-service
+          port: 80

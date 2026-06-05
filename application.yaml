@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fitness
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nimeshsv814/fitness.git
+    targetRevision: master
+    path: helm
+    helm:
+      values: |
+        userprofile:
+          activeVersion: blue
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nimesh-ns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
