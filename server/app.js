@@ -116,9 +116,7 @@ connectDB();
 
 // Root route
 app.get('/', (req, res) => {
-  res.sendFile(
-    path.join(__dirname, '..', 'public', 'pages', 'index.html')
-  );
+  res.redirect('/pages/log-workout.html');
 });
 
 // Auth routes
