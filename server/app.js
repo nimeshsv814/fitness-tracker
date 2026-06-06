@@ -134,6 +134,13 @@ app.use('/api/auth', (req, res, next) => {
   next();
 });
 
+// Handle 404 for any route not matched by static files or API routes
+app.use((req, res) => {
+  res.status(404).sendFile(
+    path.join(__dirname, '..', 'public', 'pages', '404.html')
+  );
+});
+
 // ==============================
 // 9. Server start
 // ==============================
