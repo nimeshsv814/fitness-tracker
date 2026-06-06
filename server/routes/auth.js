@@ -1,8 +1,36 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path');
+const multer = require('multer');
+const {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command
+} = require('@aws-sdk/client-s3');
 const { logger } = require('../datadog');
 
 const router = express.Router();
+
+const upload = multer({ storage: multer.memoryStorage() });
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+const bucketName = process.env.S3_BUCKET_NAME;
+const kmsKeyId = process.env.S3_KMS_KEY_ID;
+
+function safeS3Key(email, originalName) {
+  const safeEmail = (email || 'unknown').replace(/[^a-zA-Z0-9-_@.]/g, '_');
+  const safeName = (originalName || 'file').replace(/[^a-zA-Z0-9-_.]/g, '_');
+  return `${safeEmail}/${Date.now()}-${safeName}`;
+}
+
+async function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
+}
 
 // User schema for MongoDB
 const userSchema = new mongoose.Schema({
@@ -448,6 +476,120 @@ router.get('/plans/:trainer', async (req, res) => {
       action: 'trainer_plans_fetch_failed'
     });
     res.status(500).json({ msg: 'Server error', error: err.message });
+  }
+});
+
+// Upload file to S3 with AWS KMS encryption
+router.post('/upload', upload.single('file'), async (req, res) => {
+  const { email } = req.body;
+
+  if (!bucketName || !kmsKeyId) {
+    logger.error('S3 upload failed - missing S3 configuration');
+    return res.status(500).json({ msg: 'S3 is not configured on the server' });
+  }
+
+  if (!email || !req.file) {
+    logger.warn('S3 upload failed - missing email or file', {
+      email,
+      hasFile: !!req.file
+    });
+    return res.status(400).json({ msg: 'Email and file are required' });
+  }
+
+  const key = safeS3Key(email, req.file.originalname);
+
+  try {
+    await s3Client.send(new PutObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+      ServerSideEncryption: 'aws:kms',
+      SSEKMSKeyId: kmsKeyId
+    }));
+
+    logger.info('File uploaded to S3', { email, key, bucket: bucketName });
+
+    res.json({
+      success: true,
+      key,
+      downloadUrl: `/api/auth/download?key=${encodeURIComponent(key)}`
+    });
+  } catch (err) {
+    logger.error('S3 upload error', {
+      email,
+      error: err.message,
+      action: 's3_upload_failed'
+    });
+    res.status(500).json({ msg: 'File upload failed', error: err.message });
+  }
+});
+
+// List files uploaded by a user
+router.get('/files/:email', async (req, res) => {
+  const email = req.params.email;
+
+  if (!bucketName) {
+    return res.status(500).json({ msg: 'S3 is not configured on the server' });
+  }
+
+  try {
+    const prefix = `${email.replace(/[^a-zA-Z0-9-_@.]/g, '_')}/`;
+    const response = await s3Client.send(new ListObjectsV2Command({
+      Bucket: bucketName,
+      Prefix: prefix,
+      MaxKeys: 50
+    }));
+
+    const files = (response.Contents || []).map(item => ({
+      key: item.Key,
+      name: path.basename(item.Key),
+      size: item.Size,
+      lastModified: item.LastModified,
+      downloadUrl: `/api/auth/download?key=${encodeURIComponent(item.Key)}`
+    }));
+
+    res.json({ success: true, files });
+  } catch (err) {
+    logger.error('S3 list files error', {
+      email,
+      error: err.message,
+      action: 's3_list_failed'
+    });
+    res.status(500).json({ msg: 'Could not list files', error: err.message });
+  }
+});
+
+// Download file from S3
+router.get('/download', async (req, res) => {
+  const key = req.query.key;
+
+  if (!bucketName || !key) {
+    return res.status(400).json({ msg: 'File key is required' });
+  }
+
+  try {
+    const response = await s3Client.send(new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key
+    }));
+
+    res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(key)}"`);
+
+    if (response.Body.pipe) {
+      response.Body.pipe(res);
+    } else {
+      const buffer = await streamToBuffer(response.Body);
+      res.send(buffer);
+    }
+  } catch (err) {
+    logger.error('S3 download error', {
+      key,
+      error: err.message,
+      action: 's3_download_failed'
+    });
+    res.status(500).json({ msg: 'File download failed', error: err.message });
   }
 });
 
