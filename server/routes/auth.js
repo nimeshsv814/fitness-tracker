@@ -14,8 +14,8 @@ const router = express.Router();
 
 const upload = multer({ storage: multer.memoryStorage() });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
-const bucketName = process.env.S3_BUCKET_NAME;
-const kmsKeyId = process.env.S3_KMS_KEY_ID;
+const bucketName = process.env.S3_BUCKET_NAME || 'fitness-bucket-nimesh';
+const kmsKeyId = process.env.S3_KMS_KEY_ID || 'fb088b86-8fac-44b2-8d0b-35f08f4c6702';
 
 function safeS3Key(email, originalName) {
   const safeEmail = (email || 'unknown').replace(/[^a-zA-Z0-9-_@.]/g, '_');
